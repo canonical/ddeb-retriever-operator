@@ -1,24 +1,14 @@
-# This file configures Charmcraft.
-# See https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/
 type: charm
 name: ddeb-retriever
-title: Charm Template
-summary: A very short one-line summary of the charm.
+title: ddeb-retriever
+summary: Maintain a mirror of ddeb
 description: |
-  A single sentence that says what the charm is, concisely and memorably.
+  ddeb-retriever fetches ddeb to serve a debug symbol archive.
 
-  A paragraph of one to three short sentences, that describe what the charm does.
-
-  A third paragraph that explains what need the charm meets.
-
-  Finally, a paragraph that describes whom the charm is useful for.
-
-# Documentation:
-# https://documentation.ubuntu.com/charmcraft/stable/howto/build-guides/select-platforms/
-base: ubuntu@22.04
+base: ubuntu@24.04
 platforms:
-  amd64:
-  arm64:
+  amd64: null
+  arm64: null
 
 parts:
   charm:
@@ -27,41 +17,52 @@ parts:
     build-snaps:
       - astral-uv
 
-# (Optional) Configuration options for the charm
-# This config section defines charm config options, and populates the Configure
-# tab on Charmhub.
-# More information on this section at:
-# https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/#config
-# General configuration documentation:
-# https://documentation.ubuntu.com/juju/3.6/reference/configuration/#application-configuration
+charm-libs:
+  - lib: traefik_k8s.ingress
+    version: "2"
+
 config:
   options:
-    # An example config option to customise the log level of the workload
-    log-level:
+    git-repository:
       description: |
-        Configures the log level of gunicorn.
-
-        Acceptable values are: "info", "debug", "warning", "error" and "critical"
-      default: "info"
+        Source git repository of ddeb-retriever
+      default: "https://git.launchpad.net/ddeb-retriever"
+      type: string
+    git-ref:
+      description: |
+        Source git ref of ddeb-retriever.
+        Can be a branch name, tag, or full commit hash.
+      default: "main"
+      type: string
+    schedule:
+      description: |
+        Running schedule in systemd calendar format.
+        Can be tested using: systemd-analyze calendar <schedule>
+      default: "daily"
+      type: string
+    gpg-key:
+      description: |
+        Private key to sign the generated indexes.
       type: string
 
-# Your workload's containers.
-# https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/#containers
-containers:
-  some-container:
-    resource: some-container-image
+actions:
+  update:
+    description: Update the git checkout.
+  pause:
+    description: Pause the service.
+  resume:
+    description: Resume the service.
+  run:
+    description: |
+      Run the importer now.
+      Args can be passed to the underlying command. e.g.
+        juju run ddeb-retriever/leader run args="-h" 
+    properties:
+      args:
+        description: Arguments to pass to ddeb-retriever
+        type: string
 
-# This field populates the Resources tab on Charmhub.
-# https://documentation.ubuntu.com/charmcraft/stable/reference/files/charmcraft-yaml-file/#resources
-resources:
-  # An OCI image resource for each container listed above.
-  # You may remove this if your charm will run without a workload sidecar container.
-  some-container-image:
-    type: oci-image
-    description: OCI image for the 'some-container' container
-    # The upstream-source field is ignored by Charmcraft and Juju, but it can be
-    # useful to developers in identifying the source of the OCI image.  It is also
-    # used by the 'canonical/charming-actions' GitHub action for automated releases.
-    # The test_deploy function in tests/integration/test_charm.py reads upstream-source
-    # to determine which OCI image to use when running the charm's integration tests.
-    upstream-source: some-repo/some-image:some-tag
+requires:
+  ingress:
+    interface: ingress
+    limit: 1
