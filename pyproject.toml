@@ -11,6 +11,10 @@ requires-python = ">=3.10"
 # dependencies of any charmlibs that the charm uses (copy the dependencies from PYDEPS).
 dependencies = [
     "ops>=3,<4",
+    "charmlibs-apt>=1.0.0.post0",
+    "charmlibs-pathops>=1.2.0.post0",
+    "charmlibs-systemd>=1.0.0",
+    "pydantic",
 ]
 
 [dependency-groups]
@@ -25,6 +29,7 @@ unit = [
     "coverage[toml]",
     "ops[testing]",
     "pytest",
+    "pytest-operator",
 ]
 # Dependencies of integration tests
 integration = [
@@ -63,8 +68,8 @@ lint.ignore = [
     "D409",
     "D413",
 ]
-extend-exclude = ["__pycache__", "*.egg_info"]
 lint.per-file-ignores = {"tests/*" = ["D100","D101","D102","D103","D104"]}
+extend-exclude = ["__pycache__", "*.egg_info"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
