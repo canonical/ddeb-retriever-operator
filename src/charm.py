@@ -208,13 +208,15 @@ class DdebCharm(ops.CharmBase):
             [Unit]
             Description=Trigger ddeb-retriever
             [Service]
-            Restart=on-failure
+            # Already runs on a schedule, no need to hammer Launchpad on error.
+            Restart=no
             User={USER_DDEB}
             ExecStart={" ".join(RUN_COMMAND)}
             Environment=HTTP_PROXY={os.environ["HTTP_PROXY"]}
             Environment=HTTPS_PROXY={os.environ["HTTPS_PROXY"]}
             Environment=NO_PROXY={os.environ["NO_PROXY"]}
             """),
+            mode=0o444,
         )
         systemd.daemon_reload()
         systemd.service_enable("ddeb-retriever.timer")

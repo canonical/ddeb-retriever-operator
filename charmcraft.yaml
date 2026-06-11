@@ -38,7 +38,7 @@ config:
       description: |
         Running schedule in systemd calendar format.
         Can be tested using: systemd-analyze calendar <schedule>
-      default: "daily"
+      default: "hourly"
       type: string
     lp-sign-config:
       description: |
@@ -67,7 +67,7 @@ actions:
       args:
         description: Arguments to pass to ddeb-retriever
         type: string
-
+      
 requires:
   ingress:
     interface: ingress
