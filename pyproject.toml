@@ -21,8 +21,7 @@ dependencies = [
 # Dependencies of linting and static type checks
 lint = [
     "ruff",
-    "codespell",
-    "pyright",
+    "ty",
 ]
 # Dependencies of unit tests
 unit = [
@@ -51,6 +50,7 @@ log_cli_level = "INFO"
 
 # Linting tools configuration
 [tool.ruff]
+exclude = ["lib"]
 line-length = 99
 lint.select = ["E", "W", "F", "C", "N", "D", "I001"]
 lint.ignore = [
@@ -79,3 +79,7 @@ skip = "build,lib,venv,icon.svg,.tox,.git,.mypy_cache,.ruff_cache,.coverage"
 
 [tool.pyright]
 include = ["src", "tests"]
+
+[tool.ty]
+analysis.allowed-unresolved-imports = ["**", "!charm.**"]
+src.exclude = ["lib/**"]
