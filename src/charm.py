@@ -9,9 +9,11 @@ import os
 import pathlib
 import subprocess
 import sys
+from enum import StrEnum
 from grp import getgrnam
 from pwd import getpwnam
 from textwrap import dedent
+from typing import Iterable, cast
 
 import ops
 from charmlibs import apt, pathops, systemd
@@ -26,13 +28,19 @@ VALID_LOG_LEVELS = ["info", "debug", "warning", "error", "critical"]
 
 DEST_INSTALL = pathlib.Path("/opt/ddeb-retriever")
 DEST_ARCHIVE = pathlib.Path("/srv/ddebs")
-CONF_GPG_KEY = "gpg-key"
-CONF_SCHEDULE = "schedule"
-CONF_REF = "git-ref"
-CONF_REMOTE = "git-repository"
-RUN_COMMAND = (str(DEST_INSTALL / "ddeb-retriever"), "-r", str(DEST_ARCHIVE))
+DEST_LPSIGN_CONF = pathlib.Path("/etc/ddeb-retriever/lp-sign.conf")
 USER_DDEB = "ddeb"
 USER_WWW = "www-data"
+RUN_COMMAND = (str(DEST_INSTALL / "ddeb-retriever"), "-r", str(DEST_ARCHIVE))
+
+
+class ConfigKey(StrEnum):
+    """Keys for configuring the charm."""
+
+    LP_SIGN_CONFIG = "lp-sign-config"
+    SCHEDULE = "schedule"
+    GIT_REF = "git-ref"
+    GIT_REMOTE = "git-repository"
 
 
 class DdebCharm(ops.CharmBase):
@@ -46,8 +54,12 @@ class DdebCharm(ops.CharmBase):
         framework.observe(self.on.install, self.apply)
         framework.observe(self.on.config_changed, self.apply)
         framework.observe(self.on.start, self.apply)
+        framework.observe(self.on.secret_changed, self.apply)
+
         framework.observe(self.on.update_action, self.action_update)
         framework.observe(self.on.run_action, self.action_run)
+        framework.observe(self.on.pause_action, self.action_pause)
+        framework.observe(self.on.resume_action, self.action_resume)
 
         self.ingress = IngressPerAppRequirer(self, port=80)
 
@@ -56,6 +68,7 @@ class DdebCharm(ops.CharmBase):
         if not self.config_is_valid():
             return
 
+        self.do_lpsign_conf()
         self.do_deps()
         self.do_git()
         self.do_user()
@@ -65,13 +78,48 @@ class DdebCharm(ops.CharmBase):
         self.unit.set_ports(80)
         self.unit.status = ActiveStatus()
 
+    @property
+    def lp_sign_config(self) -> str:
+        """Getter for the lp-sign-config secret.
+
+        Returns the secret or a RuntimeError with a relevant status message.
+        """
+        try:
+            secret = self.model.get_secret(
+                id=str(self.model.config[ConfigKey.LP_SIGN_CONFIG])
+            ).get_content()
+        except ops.SecretNotFoundError as e:
+            raise RuntimeError("The configured `lp-sign-config` is not a valid secret URI") from e
+
+        try:
+            return secret["config"]
+        except KeyError as e:
+            raise RuntimeError("lp-sign-config secret is missing the `config` key") from e
+
     def config_is_valid(self) -> bool:
         """Validate configuration."""
-        required = {CONF_GPG_KEY, CONF_SCHEDULE, CONF_REF, CONF_REMOTE}
+        required: set[ConfigKey] = set(ConfigKey)  # ty:ignore[invalid-argument-type]
         if missing := required.difference(self.config.keys()):
             self.unit.status = BlockedStatus(f"Needs: {', '.join(missing)}")
             return False
+
+        try:
+            self.lp_sign_config
+        except RuntimeError as e:
+            self.unit.status = BlockedStatus(str(e))
+            return False
+
         return True
+
+    def do_lpsign_conf(self):
+        """Install the lpsign configuration."""
+        pathops.ensure_contents(
+            path=DEST_LPSIGN_CONF,
+            source=self.lp_sign_config,
+            user=USER_DDEB,
+            group="root",
+            mode=0o440,
+        )
 
     def do_deps(self):
         """Install dependencies."""
@@ -119,8 +167,8 @@ class DdebCharm(ops.CharmBase):
 
     def do_git(self):
         """Install or update application from git."""
-        conf_ref = self.config[CONF_REF]
-        conf_remote = self.config[CONF_REMOTE]
+        conf_ref = self.config[ConfigKey.GIT_REF]
+        conf_remote = self.config[ConfigKey.GIT_REMOTE]
         if not DEST_INSTALL.exists():
             logger.info("Deploying app from git.")
             _git("clone", conf_remote, DEST_INSTALL)
@@ -148,7 +196,7 @@ class DdebCharm(ops.CharmBase):
             [Unit]
             Description=Trigger ddeb-retriever
             [Timer]
-            OnCalendar={self.config[CONF_SCHEDULE]}
+            OnCalendar={self.config[ConfigKey.SCHEDULE]}
             [Install]
             WantedBy=timers.target
             """),
@@ -200,7 +248,7 @@ class DdebCharm(ops.CharmBase):
 
     def action_update(self, event: ops.ActionEvent):
         """Update the retriever git tree."""
-        conf_ref = self.config[CONF_REF]
+        conf_ref = self.config[ConfigKey.GIT_REF]
         logger.info("Updating git branch.")
         _git("fetch", "origin")
         _git("checkout", f"origin/{conf_ref}")
@@ -214,12 +262,11 @@ class DdebCharm(ops.CharmBase):
         """Pause the service."""
         systemd.service_pause("ddeb-retriever.timer")
         systemd.service_pause("ddeb-retriever.service")
-        self.unit.status = MaintenanceStatus()
+        self.unit.status = MaintenanceStatus("paused")
 
     def action_resume(self, event: ops.ActionEvent):
         """Resume the service."""
         systemd.service_resume("ddeb-retriever.timer")
-        systemd.service_resume("ddeb-retriever.service")
         self.unit.status = ActiveStatus()
 
 

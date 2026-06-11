@@ -40,10 +40,16 @@ config:
         Can be tested using: systemd-analyze calendar <schedule>
       default: "daily"
       type: string
-    gpg-key:
+    lp-sign-config:
       description: |
-        Private key to sign the generated indexes.
-      type: string
+        Configuration for the Launchpad Signing Service.
+        This configuration is used to sign the indexes generated for the ddeb
+        archive. This should be set to a user secret URI.
+
+        e.g. uri=$(juju add-secret lpsign 'config#file=/path/to/file')
+             juju grant-secret lpsign ddeb-retriever
+             juju config ddeb-retriever "lp-sign-config=${uri}"
+      type: secret
 
 actions:
   update:
