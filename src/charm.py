@@ -4,6 +4,7 @@
 
 """Charm for the ddeb-retriever, debug deb collector."""
 
+import json
 import logging
 import os
 import pathlib
@@ -13,7 +14,6 @@ from enum import StrEnum
 from grp import getgrnam
 from pwd import getpwnam
 from textwrap import dedent
-from typing import Iterable, cast
 
 import ops
 from charmlibs import apt, pathops, systemd
@@ -28,7 +28,7 @@ VALID_LOG_LEVELS = ["info", "debug", "warning", "error", "critical"]
 
 DEST_INSTALL = pathlib.Path("/opt/ddeb-retriever")
 DEST_ARCHIVE = pathlib.Path("/srv/ddebs")
-DEST_LPSIGN_CONF = pathlib.Path("/etc/ddeb-retriever/lp-sign.conf")
+DEST_CONF = pathlib.Path("/etc/ddeb-retriever")
 USER_DDEB = "ddeb"
 USER_WWW = "www-data"
 RUN_COMMAND = (str(DEST_INSTALL / "ddeb-retriever"), "-r", str(DEST_ARCHIVE))
@@ -55,6 +55,7 @@ class DdebCharm(ops.CharmBase):
         framework.observe(self.on.config_changed, self.apply)
         framework.observe(self.on.start, self.apply)
         framework.observe(self.on.secret_changed, self.apply)
+        framework.observe(self.on.secret_rotate, self.apply)
 
         framework.observe(self.on.update_action, self.action_update)
         framework.observe(self.on.run_action, self.action_run)
@@ -68,15 +69,16 @@ class DdebCharm(ops.CharmBase):
         if not self.config_is_valid():
             return
 
-        self.do_lpsign_conf()
         self.do_deps()
         self.do_git()
         self.do_user()
+        self.do_conf()
         self.do_dirs()
         self.do_systemd()
         self.do_httpd()
         self.unit.set_ports(80)
-        self.unit.status = ActiveStatus()
+        if self.unit.status.name != "maintenance":
+            self.unit.status = ActiveStatus()
 
     @property
     def lp_sign_config(self) -> str:
@@ -98,7 +100,7 @@ class DdebCharm(ops.CharmBase):
 
     def config_is_valid(self) -> bool:
         """Validate configuration."""
-        required: set[ConfigKey] = set(ConfigKey)  # ty:ignore[invalid-argument-type]
+        required: set[ConfigKey] = set(ConfigKey)  # type: ignore
         if missing := required.difference(self.config.keys()):
             self.unit.status = BlockedStatus(f"Needs: {', '.join(missing)}")
             return False
@@ -111,11 +113,25 @@ class DdebCharm(ops.CharmBase):
 
         return True
 
-    def do_lpsign_conf(self):
-        """Install the lpsign configuration."""
+    def do_conf(self):
+        """Install the configuration."""
         pathops.ensure_contents(
-            path=DEST_LPSIGN_CONF,
+            path=DEST_CONF / "lp-sign.conf",
             source=self.lp_sign_config,
+            user=USER_DDEB,
+            group="root",
+            mode=0o440,
+        )
+        # Informative. Used by subordinate charm.
+        pathops.ensure_contents(
+            path=DEST_CONF / "conf.json",
+            source=json.dumps(
+                {
+                    "install": str(DEST_INSTALL),
+                    "archive": str(DEST_ARCHIVE),
+                    "user": str(USER_DDEB),
+                }
+            ),
             user=USER_DDEB,
             group="root",
             mode=0o440,
@@ -168,10 +184,10 @@ class DdebCharm(ops.CharmBase):
     def do_git(self):
         """Install or update application from git."""
         conf_ref = self.config[ConfigKey.GIT_REF]
-        conf_remote = self.config[ConfigKey.GIT_REMOTE]
+        conf_remote = str(self.config[ConfigKey.GIT_REMOTE])
         if not DEST_INSTALL.exists():
             logger.info("Deploying app from git.")
-            _git("clone", conf_remote, DEST_INSTALL)
+            _git("clone", conf_remote, str(DEST_INSTALL))
 
         current_remote = _git("remote", "get-url", "origin").strip()
         if conf_remote != current_remote:
@@ -200,6 +216,7 @@ class DdebCharm(ops.CharmBase):
             [Install]
             WantedBy=timers.target
             """),
+            mode=0o444,
         )
         changed |= pathops.ensure_contents(
             path="/etc/systemd/system/ddeb-retriever.service",
@@ -219,8 +236,11 @@ class DdebCharm(ops.CharmBase):
             mode=0o444,
         )
         systemd.daemon_reload()
-        systemd.service_enable("ddeb-retriever.timer")
-        systemd.service_start("ddeb-retriever.timer")
+        if self.unit.status.name != "maintenance":
+            systemd.service_enable("ddeb-retriever.timer")
+            systemd.service_start("ddeb-retriever.timer")
+        else:
+            self.action_pause(None)
 
     def do_httpd(self):
         """Set httpd service."""
@@ -260,7 +280,7 @@ class DdebCharm(ops.CharmBase):
         args = tuple(value for value in event.params.get("args", "").split(" ") if value)
         subprocess.check_call(("sudo", "-u", USER_DDEB, "--") + RUN_COMMAND + args)
 
-    def action_pause(self, event: ops.ActionEvent):
+    def action_pause(self, event):
         """Pause the service."""
         systemd.service_pause("ddeb-retriever.timer")
         systemd.service_pause("ddeb-retriever.service")
@@ -269,15 +289,16 @@ class DdebCharm(ops.CharmBase):
     def action_resume(self, event: ops.ActionEvent):
         """Resume the service."""
         systemd.service_resume("ddeb-retriever.timer")
+        systemd.service_resume("ddeb-retriever.service")
         self.unit.status = ActiveStatus()
 
 
-def _git(*args, git_dir=DEST_INSTALL) -> str:
+def _git(*args: str, git_dir=DEST_INSTALL) -> str:
     """Run a git command against app and return output."""
     if args and args[0] == "clone":
-        args = ["git", *args]
+        args = ("git", *args)
     else:
-        args = ["git", "-C", str(git_dir), *args]
+        args = ("git", "-C", str(git_dir), *args)
     return subprocess.check_output(
         args,
         encoding=sys.getfilesystemencoding(),
