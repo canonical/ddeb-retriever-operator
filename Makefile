@@ -10,19 +10,19 @@ lint: .venv typecheck ruff format
 
 .PHONY: typecheck
 typecheck:
-	uv run ty check
+	uv run -m ty check
 
 .PHONY: ruff
 ruff:
-	uv run ruff check
+	uv run -m ruff check
 
 .PHONY: format
 format:
-	uv run ruff format --check --diff
+	uv run -m ruff format --check --diff
 
 .PHONY: test
 test: .venv
-	uv run pytest tests/unit
+	uv run -m pytest tests/unit
 
 .PHONY: clean
 clean:
