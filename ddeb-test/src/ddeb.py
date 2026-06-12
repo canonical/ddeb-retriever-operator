@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical
 # See LICENSE file for licensing details.
-
 """Functions for interacting with the workload."""
+
 import json
 import logging
 import pathlib

@@ -5,7 +5,6 @@
 """ddeb-retriever test sidecar."""
 
 import logging
-import time
 
 import ops
 
