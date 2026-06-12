@@ -1,6 +1,9 @@
+.PHONY: all
+all: lint test
+	
 .venv:
-	uv venv
-	uv pip install -e .[lint]
+	uv sync --all-groups
+	uv pip install -e .
 
 .PHONY: lint
 lint: .venv typecheck ruff format
@@ -16,3 +19,11 @@ ruff:
 .PHONY: format
 format:
 	uv run ruff format --check --diff
+
+.PHONY: test
+test: .venv
+	uv run pytest tests/unit
+
+.PHONY: clean
+clean:
+	rm -rf .venv *.charm build
