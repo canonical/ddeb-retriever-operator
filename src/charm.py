@@ -64,11 +64,7 @@ class DdebCharm(ops.CharmBase):
         ddeb_retriever.do_systemd(cast(str, self.config[ConfigKey.SCHEDULE]))
         ddeb_retriever.do_httpd()
         self.unit.set_ports(80)
-
-        if ddeb_retriever.service_is_paused():
-            self.unit.status = MaintenanceStatus("paused")
-        else:
-            self.unit.status = ActiveStatus()
+        self.update_status()
 
     @property
     def lp_sign_config(self) -> str:
@@ -116,11 +112,19 @@ class DdebCharm(ops.CharmBase):
     def action_pause(self, event):
         """Pause the service."""
         ddeb_retriever.service_pause()
-        self.unit.status = MaintenanceStatus("paused")
+        self.update_status()
 
     def action_resume(self, event: ops.ActionEvent):
         """Resume the service."""
-        self.unit.status = ActiveStatus()
+        ddeb_retriever.service_resume()
+        self.update_status()
+
+    def update_status(self):
+        """Update the charm status based on service status."""
+        if ddeb_retriever.service_is_paused():
+            self.unit.status = MaintenanceStatus("paused")
+        else:
+            self.unit.status = ActiveStatus()
 
 
 if __name__ == "__main__":  # pragma: nocover

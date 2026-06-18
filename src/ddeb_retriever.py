@@ -11,12 +11,13 @@ import logging
 import os
 import pathlib
 import subprocess
-import sys
 from grp import getgrnam
 from pwd import getpwnam
 from textwrap import dedent
 
 from charmlibs import apt, pathops, systemd
+
+import git
 
 logger = logging.getLogger(__name__)
 
@@ -105,21 +106,21 @@ def do_git(*, remote: str, ref: str):
     """Install or update application from git."""
     if not DEST_INSTALL.exists():
         logger.info("Deploying app from git.")
-        _git("clone", remote, str(DEST_INSTALL))
+        git.git("clone", remote, str(DEST_INSTALL), git_dir=None)
 
-    current_remote = _git("remote", "get-url", "origin").strip()
+    current_remote = git.git("remote", "get-url", "origin", git_dir=DEST_INSTALL).strip()
     if remote != current_remote:
         logger.info("Current remote: %s", current_remote)
         logger.info("Updating origin.")
-        _git("remote", "set-url", "origin", remote)
+        git.git("remote", "set-url", "origin", remote, git_dir=DEST_INSTALL)
         logger.info("Updating git branch.")
-        _git("fetch", "origin")
+        git.git("fetch", "origin", git_dir=DEST_INSTALL)
 
-    current_ref = _git_current_ref()
+    current_ref = git.current_ref(git_dir=DEST_INSTALL)
     if ref != current_ref:
         logger.info("Current git ref: %s", current_ref)
         logger.info("Updating git branch.")
-        _git("checkout", f"origin/{ref}")
+        git.git("checkout", f"origin/{ref}", git_dir=DEST_INSTALL)
 
 
 def do_systemd(schedule: str):
@@ -197,8 +198,8 @@ def run_retriever(args):
 def update_git(git_ref: str):
     """Update the ddeb_retriever source tree from a git ref."""
     logger.info("Updating git branch.")
-    _git("fetch", "origin")
-    _git("checkout", f"origin/{git_ref}")
+    git.git("fetch", "origin", git_dir=DEST_INSTALL)
+    git.git("checkout", f"origin/{git_ref}", git_dir=DEST_INSTALL)
 
 
 def service_pause():
@@ -216,23 +217,3 @@ def service_resume():
 def service_is_paused() -> bool:
     """Return whether the importer service is currently disabled."""
     return not systemd.service_running(f"{SYSTEMD_UNIT}.timer")
-
-
-def _git(*args: str, git_dir=DEST_INSTALL) -> str:
-    """Run a git command against app and return output."""
-    if args and args[0] == "clone":
-        args = ("git", *args)
-    else:
-        args = ("git", "-C", str(git_dir), *args)
-    return subprocess.check_output(
-        args,
-        encoding=sys.getfilesystemencoding(),
-    )
-
-
-def _git_current_ref():
-    try:
-        ref = _git("describe", "--all", "--exact-match", "--always", "HEAD")
-        return ref.removeprefix("remote/origin/").removeprefix("heads/").strip()
-    except subprocess.CalledProcessError:
-        return _git("rev-parse", "HEAD").strip()
