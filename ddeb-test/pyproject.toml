@@ -9,6 +9,8 @@ requires-python = ">=3.10"
 dependencies = [
     "ops~=3.7",
     "charmlibs-pathops>=1.2.0.post0",
+    "charmlibs-systemd>=1.0.0.post0",
+    "charmlibs-apt>=1.0.0.post1",
 ]
 
 [dependency-groups]

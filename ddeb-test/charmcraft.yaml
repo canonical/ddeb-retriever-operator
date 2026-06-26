@@ -5,7 +5,6 @@ summary: ddeb-retriever test functionality
 description: |
   Adds test actions and overrides for running ddeb-retriever in development.
 subordinate: true
-
 base: ubuntu@24.04
 platforms:
   amd64:

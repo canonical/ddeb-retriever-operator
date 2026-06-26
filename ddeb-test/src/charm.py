@@ -19,11 +19,18 @@ class DdebTestCharm(ops.CharmBase):
     def __init__(self, framework: ops.Framework):
         super().__init__(framework)
         framework.observe(self.on.reset_timestamp_action, self.reset_timestamp_action)
+        framework.observe(self.on.install, self.install)
 
     def reset_timestamp_action(self, event: ops.ActionEvent):
         """Reset the fetch last timestamp."""
         ts = event.params.get("timestamp")
         ddeb.reset_timestamp(ts)
+
+    def install(self, event):
+        """Install hook."""
+        ddeb.monkey_patch_site()
+        ddeb.install_mock_lpsign()
+        self.unit.status = ops.ActiveStatus()
 
 
 if __name__ == "__main__":  # pragma: nocover
