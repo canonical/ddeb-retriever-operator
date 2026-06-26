@@ -22,6 +22,7 @@ dependencies = [
 lint = [
     "ruff",
     "ty",
+    "codespell",
 ]
 # Dependencies of unit tests
 unit = [
@@ -36,6 +37,7 @@ integration = [
     "pytest",
     "PyYAML",
     "pytest-dependency",
+    "requests",
 ]
 
 # Testing tools configuration
@@ -80,9 +82,6 @@ max-complexity = 10
 
 [tool.codespell]
 skip = "build,lib,venv,icon.svg,.tox,.git,.mypy_cache,.ruff_cache,.coverage"
-
-[tool.pyright]
-include = ["src", "tests"]
 
 [tool.ty]
 analysis.allowed-unresolved-imports = ["**", "!charm.**"]
