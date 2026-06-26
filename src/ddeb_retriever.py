@@ -29,7 +29,13 @@ LPSIGN_CONF = DEST_CONF / "lp-sign.conf"
 SYSTEMD_UNIT = "ddeb-retriever"
 USER_DDEB = "ddeb"
 USER_WWW = "www-data"
-RUN_COMMAND = str(DEST_INSTALL / "ddeb-retriever"), "-r", str(DEST_ARCHIVE), "--", str(LPSIGN_CONF)
+RUN_COMMAND = (
+    str(DEST_INSTALL / "ddeb-retriever"),
+    "-r",
+    str(DEST_ARCHIVE),
+    "--lpsign-config",
+    str(LPSIGN_CONF),
+)
 
 
 def do_conf(lp_sign_config: str):
