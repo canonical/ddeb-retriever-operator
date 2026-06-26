@@ -1,5 +1,6 @@
 # Copyright 2025 Canonical
 # See LICENSE file for licensing details.
+import subprocess
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -77,6 +78,27 @@ def test_ensure_clone_checks_out_ref_when_it_differs():
     )
 
 
+def test_ensure_clone_checks_out_ref_when_broken():
+    dest = Path("/opt/dest")
+    with (
+        mock.patch.object(Path, "exists", return_value=True),
+        mock.patch("git.git") as mock_git,
+    ):
+        mock_git.side_effect = [
+            "https://repo\n",
+            subprocess.CalledProcessError(1, "git describe"),
+            subprocess.CalledProcessError(1, "git rev-parse"),
+            "",
+        ]
+        git.ensure_clone(dest=dest, remote="https://repo", ref="main")
+
+    mock_git.assert_has_calls(
+        [
+            mock.call("checkout", "origin/main", git_dir=dest),
+        ]
+    )
+
+
 def test_ensure_clone_noops_when_remote_and_ref_already_match():
     dest = Path("/opt/dest")
     with (
@@ -88,3 +110,12 @@ def test_ensure_clone_noops_when_remote_and_ref_already_match():
         git.ensure_clone(dest=dest, remote="https://repo", ref="main")
 
     mock_git.assert_called_once_with("remote", "get-url", "origin", git_dir=dest)
+
+
+def test_get_current_ref():
+    dest = Path("/opt/dest")
+    with mock.patch("git.git") as mock_git:
+        mock_git.return_value = "remote/origin/heads/main\n"
+        result = git.get_current_ref(dest)
+
+    assert result == "main"
