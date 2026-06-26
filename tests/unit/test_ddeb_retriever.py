@@ -7,18 +7,10 @@ import ddeb_retriever
 
 def test_run_retriever_invokes_sudo_as_ddeb_user():
     with mock.patch("subprocess.check_call") as mock_check_call:
-        ddeb_retriever.run_retriever(("--foo", "bar"))
+        ddeb_retriever.run_retriever()
 
     mock_check_call.assert_called_once_with(
-        (
-            "sudo",
-            "-u",
-            ddeb_retriever.USER_DDEB,
-            "--",
-            *ddeb_retriever.RUN_COMMAND,
-            "--foo",
-            "bar",
-        )
+        ["systemctl", "start", "--wait", "ddeb-retriever.service"]
     )
 
 
