@@ -12,6 +12,7 @@ import os
 import pathlib
 import subprocess
 from grp import getgrnam
+from pathlib import Path
 from pwd import getpwnam
 from textwrap import dedent
 
@@ -24,16 +25,17 @@ logger = logging.getLogger(__name__)
 DEST_INSTALL = pathlib.Path("/opt/ddeb-retriever")
 DEST_ARCHIVE = pathlib.Path("/srv/ddebs")
 DEST_CONF = pathlib.Path("/etc/ddeb-retriever")
+LPSIGN_CONF = DEST_CONF / "lp-sign.conf"
 SYSTEMD_UNIT = "ddeb-retriever"
 USER_DDEB = "ddeb"
 USER_WWW = "www-data"
-RUN_COMMAND = (str(DEST_INSTALL / "ddeb-retriever"), "-r", str(DEST_ARCHIVE))
+RUN_COMMAND = str(DEST_INSTALL / "ddeb-retriever"), "-r", str(DEST_ARCHIVE), "--", str(LPSIGN_CONF)
 
 
 def do_conf(lp_sign_config: str):
     """Install the configuration."""
     pathops.ensure_contents(
-        path=DEST_CONF / "lp-sign.conf",
+        path=LPSIGN_CONF,
         source=lp_sign_config,
         user=USER_DDEB,
         group="root",
@@ -60,7 +62,7 @@ def do_deps():
     logger.info("Installing dependencies.")
     try:
         apt.update()
-        apt.add_package(["git", "systemd", "python3-launchpadlib", "apache2"])
+        apt.add_package(["git", "systemd", "python3-launchpadlib", "apache2", "python3-nacl"])
     except apt.Error as e:
         logger.error("Failed to install dependencies: %s", e.message)
 
@@ -104,27 +106,13 @@ def do_dirs():
 
 def do_git(*, remote: str, ref: str):
     """Install or update application from git."""
-    if not DEST_INSTALL.exists():
-        logger.info("Deploying app from git.")
-        git.git("clone", remote, str(DEST_INSTALL), git_dir=None)
-
-    current_remote = git.git("remote", "get-url", "origin", git_dir=DEST_INSTALL).strip()
-    if remote != current_remote:
-        logger.info("Current remote: %s", current_remote)
-        logger.info("Updating origin.")
-        git.git("remote", "set-url", "origin", remote, git_dir=DEST_INSTALL)
-        logger.info("Updating git branch.")
-        git.git("fetch", "origin", git_dir=DEST_INSTALL)
-
-    current_ref = git.current_ref(git_dir=DEST_INSTALL)
-    if ref != current_ref:
-        logger.info("Current git ref: %s", current_ref)
-        logger.info("Updating git branch.")
-        git.git("checkout", f"origin/{ref}", git_dir=DEST_INSTALL)
+    git.ensure_clone(dest=DEST_INSTALL, remote=remote, ref=ref)
 
 
 def do_systemd(schedule: str):
     """Set or update application timers."""
+    timer_path = Path(f"/etc/systemd/system/{SYSTEMD_UNIT}.timer")
+    first_install = not timer_path.exists()
     changed = pathops.ensure_contents(
         path=f"/etc/systemd/system/{SYSTEMD_UNIT}.timer",
         source=dedent(f"""\
@@ -157,10 +145,10 @@ def do_systemd(schedule: str):
     )
     systemd.daemon_reload()
     # Ensure consistent pause state of units.
-    if service_is_paused():
-        service_pause()
-    else:
+    if first_install or not service_is_paused():
         service_resume()
+    else:
+        service_pause()
 
 
 def do_httpd():
@@ -190,9 +178,9 @@ def do_httpd():
         systemd.service_reload("apache2.service")
 
 
-def run_retriever(args):
-    """Spawn the retriver with specific arguments."""
-    subprocess.check_call(("sudo", "-u", USER_DDEB, "--") + RUN_COMMAND + args)
+def run_retriever():
+    """Spawn the retriever."""
+    subprocess.check_call(["systemctl", "start", "--wait", f"{SYSTEMD_UNIT}.service"])
 
 
 def update_git(git_ref: str):

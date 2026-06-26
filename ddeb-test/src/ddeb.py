@@ -4,15 +4,13 @@
 
 import json
 import logging
-import pathlib
+import os
 import textwrap
 import time
 
 from charmlibs import apt, pathops, systemd
 
-DEST_ARCHIVE = pathlib.Path("/srv/ddebs")
 LOG = logging.getLogger(__name__)
-USER_DDEB = "ddeb"
 
 
 def reset_timestamp(ts: int | None):
@@ -21,7 +19,7 @@ def reset_timestamp(ts: int | None):
         conf = json.load(fd)
 
     data = str(ts or int(time.time()))
-    ts_file = pathlib.Path(conf["archive"]) / ".lp-threshold"
+    ts_file = os.path.join(conf["archive"], ".lp-threshold")
     pathops.ensure_contents(
         path=ts_file,
         source=data,
@@ -35,12 +33,13 @@ def install_mock_lpsign():
     """Install test lpsign service."""
     apt.update()
     apt.add_package(["python3-flask"])
+
     pathops.ensure_contents(
-        path="/etc/systemd/system/lpsign.service",
-        source=(pathlib.Path(__file__).parent / "lpsign.py").open(),
+        path="/usr/local/bin/lpsign",
+        source=open(os.path.join(os.path.dirname(__file__), "lpsign.py")),
         user="root",
         group="root",
-        mode=0o644,
+        mode=0o755,
     )
     unit = textwrap.dedent("""\
         [Service]
@@ -59,6 +58,7 @@ def install_mock_lpsign():
     )
     systemd.daemon_reload()
     systemd.service_enable("lpsign")
+    systemd.service_start("lpsign")
 
 
 def monkey_patch_site():

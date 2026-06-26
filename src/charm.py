@@ -106,8 +106,7 @@ class DdebCharm(ops.CharmBase):
 
     def action_run(self, event: ops.ActionEvent):
         """Run the retriever."""
-        args = tuple(value for value in event.params.get("args", "").split(" ") if value)
-        ddeb_retriever.run_retriever(args)
+        ddeb_retriever.run_retriever()
 
     def action_pause(self, event):
         """Pause the service."""
