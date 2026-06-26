@@ -28,11 +28,6 @@ def test_deploy(charm: pathlib.Path, juju: jubilant.Juju):
     juju.config(APP, values={"lp-sign-config": secret_uri})
     juju.wait(jubilant.all_active)
 
-    # Add devel charm. Patches to truncate sync.
-    juju.deploy(list(pathlib.Path("ddeb-test").glob("*.charm"))[0], app="test")
-    juju.integrate("test", APP)
-    juju.wait(jubilant.all_active)
-
     # service is listing
     ip_addr = next(iter(juju.status().apps[APP].units.values())).public_address
     assert 200 == requests.get(f"http://{ip_addr}").status_code
@@ -41,33 +36,28 @@ def test_deploy(charm: pathlib.Path, juju: jubilant.Juju):
     juju.exec(f"systemctl is-active {APP}.timer", unit=f"{APP}/leader")
 
 
-@pytest.fixture(scope="module")
-def test_lpsign(juju: jubilant.Juju):
-    """Deploy lpsign."""
-    # TODO
-    juju.wait(jubilant.all_active)
-    yield
-    # TODO
-
-
 @pytest.mark.dependency(depends=["test_deploy"])
-def test_sync(juju: jubilant.Juju):
-    """Retriever can run to completion by doing a 'thin' sync.
+def test_retriever(juju: jubilant.Juju):
+    """Run a "short" retriever pass."""
+    # Add devel charm. Patches to truncate sync and mock signing.
+    juju.deploy(list(pathlib.Path("ddeb-test").glob("*.charm"))[0], app="test")
+    juju.integrate("test", APP)
+    juju.wait(jubilant.all_active)
 
-    The thin sync is patched by the dev charm.
-    Although this tries to pull only 2 packages, the Launchpad query will
-    be on a full archive, thus this test will still take a few minutes to run.
-    """
-    juju.run(action="run", unit=f"{APP}/leader", wait=600)
-    with pytest.raises(jubilant.TaskError):
-        juju.exec(f"systemctl is-active {APP}.service", unit=f"{APP}/leader")
-
+    juju.run(unit="ddeb-retriever/leader", action="run", wait=600)
+    # ensure the run ended correctly
     with pytest.raises(jubilant.TaskError):
         juju.exec(f"systemctl is-failed {APP}.service", unit=f"{APP}/leader")
 
+    # Check for signed release
     ip_addr = next(iter(juju.status().apps[APP].units.values())).public_address
-    assert 200 == requests.get(f"http://{ip_addr}/dists").status_code
-    juju.exec("find /srv -name '*.ddeb' | grep .", unit=f"{APP}/leader")
+    response = requests.get(f"http://{ip_addr}/dists/resolute/Release.gpg")
+    assert 200 == response.status_code
+    assert response.text.startswith("-----BEGIN ")
+    # Check for inline signature
+    response = requests.get(f"http://{ip_addr}/dists/resolute/InRelease")
+    assert 200 == response.status_code
+    assert "SIGNED MESSAGE" in response.text
 
 
 @pytest.mark.dependency(depends=["test_deploy"])
