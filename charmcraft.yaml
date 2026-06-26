@@ -8,7 +8,6 @@ description: |
 base: ubuntu@24.04
 platforms:
   amd64: null
-  arm64: null
 
 parts:
   charm:
@@ -59,15 +58,7 @@ actions:
   resume:
     description: Resume the service.
   run:
-    description: |
-      Run the importer now.
-      Args can be passed to the underlying command. e.g.
-        juju run ddeb-retriever/leader run args="-h" 
-    properties:
-      args:
-        description: Arguments to pass to ddeb-retriever
-        type: string
-      
+    description: Run the importer now.
 requires:
   ingress:
     interface: ingress

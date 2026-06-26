@@ -35,6 +35,7 @@ integration = [
     "jubilant",
     "pytest",
     "PyYAML",
+    "pytest-dependency",
 ]
 
 # Testing tools configuration
