@@ -1,7 +1,9 @@
 # Copyright 2025 Canonical
 # See LICENSE file for licensing details.
+import os
 from unittest import mock
 
+import charm
 import ddeb_retriever
 
 
@@ -44,3 +46,21 @@ def test_service_is_paused_true_when_timer_not_running():
 def test_service_is_paused_false_when_timer_running():
     with mock.patch("ddeb_retriever.systemd.service_running", return_value=True):
         assert ddeb_retriever.service_is_paused() is False
+
+
+def test_wb_proxy_config():
+    """Whitebox testing for proxy config."""
+    os.environ["JUJU_CHARM_HTTP_PROXY"] = "http://theproxy"
+    conf_valid = []
+
+    class MockDdeb(charm.DdebCharm):
+        on = mock.MagicMock()
+
+        def config_is_valid(self):
+            assert os.environ["HTTP_PROXY"] == "http://theproxy"
+            conf_valid.append(True)
+
+    # force early return
+    ddeb = MockDdeb(mock.MagicMock())
+    charm.DdebCharm.apply(ddeb)
+    assert conf_valid

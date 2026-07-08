@@ -32,9 +32,9 @@ class DdebCharm(ops.CharmBase):
 
     def __init__(self, framework: ops.Framework):
         super().__init__(framework)
-        os.environ["HTTPS_PROXY"] = os.getenv("JUJU_HTTPS_PROXY", "")
-        os.environ["HTTP_PROXY"] = os.getenv("JUJU_HTTP_PROXY", "")
-        os.environ["NO_PROXY"] = os.getenv("JUJU_NO_PROXY", "")
+        os.environ["HTTPS_PROXY"] = os.getenv("JUJU_CHARM_HTTPS_PROXY", "")
+        os.environ["HTTP_PROXY"] = os.getenv("JUJU_CHARM_HTTP_PROXY", "")
+        os.environ["NO_PROXY"] = os.getenv("JUJU_CHARM_NO_PROXY", "")
         framework.observe(self.on.install, self.apply)
         framework.observe(self.on.config_changed, self.apply)
         framework.observe(self.on.start, self.apply)
