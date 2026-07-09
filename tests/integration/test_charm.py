@@ -82,3 +82,19 @@ def test_pause_resume(juju: jubilant.Juju):
         juju.wait(jubilant.all_active)
         cmd = juju.exec(f"systemctl is-active {APP}.timer", unit=f"{APP}/leader")
         assert cmd.return_code == 0, f"resume pass {call_pass}"
+
+
+@pytest.mark.dependency(depends=["test_deploy"])
+def test_proxy(juju: jubilant.Juju):
+    """Test service maintenance actions."""
+    try:
+        juju.model_config(values={"juju-http-proxy": "http://myproxy"})
+        # force charm hook without redeploy
+        juju.config(APP, values={"schedule": "weekly"})
+        juju.wait(jubilant.all_active)
+        task = juju.exec(f"systemctl show {APP}.service", unit=f"{APP}/leader")
+        assert "HTTP_PROXY=http://myproxy" in task.stdout
+    finally:
+        juju.model_config(reset={"juju-http-proxy"})
+        juju.config(APP, reset={"schedule"})
+        juju.wait(jubilant.all_active)
