@@ -1,82 +1,130 @@
 #!/usr/bin/env python3
-# Copyright 2025 Canonical
+# Copyright 2025 Canonical Limited
 # See LICENSE file for licensing details.
 
-"""Charm the application."""
+"""Charm for the ddeb-retriever, debug deb collector."""
 
 import logging
-import time
+import os
+from enum import StrEnum
+from typing import cast
 
 import ops
+from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
+from ops.model import ActiveStatus, BlockedStatus, MaintenanceStatus
 
-# A standalone module for workload-specific logic (no charming concerns):
 import ddeb_retriever
 
 logger = logging.getLogger(__name__)
 
-SERVICE_NAME = "some-service"  # Name of Pebble service that runs in the workload container.
+
+class ConfigKey(StrEnum):
+    """Keys for configuring the charm."""
+
+    LP_SIGN_CONFIG = "lp-sign-config"
+    SCHEDULE = "schedule"
+    GIT_REF = "git-ref"
+    GIT_REMOTE = "git-repository"
 
 
-class DdebRetrieverCharm(ops.CharmBase):
-    """Charm the application."""
+class DdebCharm(ops.CharmBase):
+    """Charm the service."""
 
     def __init__(self, framework: ops.Framework):
         super().__init__(framework)
-        framework.observe(self.on["some_container"].pebble_ready, self._on_pebble_ready)
-        self.container = self.unit.get_container("some-container")
+        os.environ["HTTPS_PROXY"] = os.getenv("JUJU_CHARM_HTTPS_PROXY", "")
+        os.environ["HTTP_PROXY"] = os.getenv("JUJU_CHARM_HTTP_PROXY", "")
+        os.environ["NO_PROXY"] = os.getenv("JUJU_CHARM_NO_PROXY", "")
+        framework.observe(self.on.install, self.apply)
+        framework.observe(self.on.config_changed, self.apply)
+        framework.observe(self.on.start, self.apply)
+        framework.observe(self.on.secret_changed, self.apply)
+        framework.observe(self.on.secret_rotate, self.apply)
 
-    def _on_pebble_ready(self, event: ops.PebbleReadyEvent):
-        """Handle pebble-ready event."""
-        self.unit.status = ops.MaintenanceStatus("starting workload")
-        # To start the workload, we'll add a Pebble layer to the workload container.
-        # The layer specifies which service to run.
-        layer: ops.pebble.LayerDict = {
-            "services": {
-                SERVICE_NAME: {
-                    "override": "replace",
-                    "summary": "A service that runs in the workload container",
-                    "command": "/bin/foo",  # Change this!
-                    "startup": "enabled",
-                }
-            }
-        }
-        self.container.add_layer("base", layer, combine=True)
-        # If the container image is a rock, the container already has a Pebble layer.
-        # In this case, you could remove 'add_layer' or use 'add_layer' to extend the rock's layer.
-        # To learn about rocks, see https://documentation.ubuntu.com/rockcraft/en/stable/
-        self.container.replan()  # Starts the service (because 'startup' is enabled in the layer).
-        self.wait_for_ready()
-        version = ddeb_retriever.get_version()
-        if version is not None:
-            self.unit.set_workload_version(version)
-        self.unit.status = ops.ActiveStatus()
+        framework.observe(self.on.update_action, self.action_update)
+        framework.observe(self.on.run_action, self.action_run)
+        framework.observe(self.on.pause_action, self.action_pause)
+        framework.observe(self.on.resume_action, self.action_resume)
 
-    def is_ready(self) -> bool:
-        """Check whether the workload is ready to use."""
-        # We'll first check whether all Pebble services are running.
-        for name, service_info in self.container.get_services().items():
-            if not service_info.is_running():
-                logger.info("the workload is not ready (service '%s' is not running)", name)
-                return False
-        # The Pebble services are running, but the workload might not be ready to use.
-        # So we'll check whether all Pebble 'ready' checks are passing.
-        checks = self.container.get_checks(level=ops.pebble.CheckLevel.READY)
-        for check_info in checks.values():
-            if check_info.status != ops.pebble.CheckStatus.UP:
-                return False
+        self.ingress = IngressPerAppRequirer(self, port=80)
+
+    def apply(self, *_):
+        """Apply the full state of the application."""
+        if not self.config_is_valid():
+            return
+
+        ddeb_retriever.do_deps()
+        ddeb_retriever.do_git(
+            remote=cast(str, self.config[ConfigKey.GIT_REMOTE]),
+            ref=cast(str, self.config[ConfigKey.GIT_REF]),
+        )
+        ddeb_retriever.do_user()
+        ddeb_retriever.do_conf(self.lp_sign_config)
+        ddeb_retriever.do_dirs()
+        ddeb_retriever.do_systemd(cast(str, self.config[ConfigKey.SCHEDULE]))
+        ddeb_retriever.do_httpd()
+        self.unit.set_ports(80)
+        self.update_status()
+
+    @property
+    def lp_sign_config(self) -> str:
+        """Getter for the lp-sign-config secret.
+
+        Returns the secret or a RuntimeError with a relevant status message.
+        """
+        try:
+            secret = self.model.get_secret(
+                id=str(self.model.config[ConfigKey.LP_SIGN_CONFIG])
+            ).get_content()
+        except ops.SecretNotFoundError as e:
+            raise RuntimeError("The configured `lp-sign-config` is not a valid secret URI") from e
+
+        try:
+            return secret["config"]
+        except KeyError as e:
+            raise RuntimeError("lp-sign-config secret is missing the `config` key") from e
+
+    def config_is_valid(self) -> bool:
+        """Validate configuration."""
+        required: set[ConfigKey] = set(ConfigKey)  # type: ignore
+        if missing := required.difference(self.config.keys()):
+            self.unit.status = BlockedStatus(f"Needs: {', '.join(missing)}")
+            return False
+
+        try:
+            self.lp_sign_config
+        except RuntimeError as e:
+            self.unit.status = BlockedStatus(str(e))
+            return False
+
         return True
 
-    def wait_for_ready(self) -> None:
-        """Wait for the workload to be ready to use."""
-        for _ in range(3):
-            if self.is_ready():
-                return
-            time.sleep(1)
-        logger.error("the workload was not ready within the expected time")
-        raise RuntimeError("workload is not ready")
-        # The runtime error is for you (the charm author) to see, not for the user of the charm.
-        # Make sure that this function waits long enough for the workload to be ready.
+    def action_update(self, event: ops.ActionEvent):
+        """Update the retriever git tree."""
+        conf_ref = cast(str, self.config[ConfigKey.GIT_REF])
+        ddeb_retriever.update_git(conf_ref)
+
+    def action_run(self, event: ops.ActionEvent):
+        """Run the retriever."""
+        ddeb_retriever.run_retriever()
+
+    def action_pause(self, event):
+        """Pause the service."""
+        ddeb_retriever.service_pause()
+        self.update_status()
+
+    def action_resume(self, event: ops.ActionEvent):
+        """Resume the service."""
+        ddeb_retriever.service_resume()
+        self.update_status()
+
+    def update_status(self):
+        """Update the charm status based on service status."""
+        if ddeb_retriever.service_is_paused():
+            self.unit.status = MaintenanceStatus("paused")
+        else:
+            self.unit.status = ActiveStatus()
 
 
 if __name__ == "__main__":  # pragma: nocover
-    ops.main(DdebRetrieverCharm)
+    ops.main(DdebCharm)
